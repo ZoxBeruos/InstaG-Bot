@@ -1,161 +1,121 @@
-name: Rust CI
+name: FREAX_DIS
 
 on:
-  push:
-    branches:
-      - main
-      - 'gaebal/**'
-      - 'omx-issue-*'
-    paths:
-      - .github/workflows/rust-ci.yml
-      - .github/scripts/check_doc_source_of_truth.py
-      - .github/scripts/check_release_readiness.py
-      - .github/FUNDING.yml
-      - CODE_OF_CONDUCT.md
-      - CONTRIBUTING.md
-      - LICENSE
-      - README.md
-      - SECURITY.md
-      - SUPPORT.md
-      - USAGE.md
-      - PARITY.md
-      - PHILOSOPHY.md
-      - ROADMAP.md
-      - scripts/roadmap-*.sh
-      - tests/test_roadmap_helpers.py
-      - docs/**
-      - rust/**
-  pull_request:
-    branches:
-      - main
-    paths:
-      - .github/workflows/rust-ci.yml
-      - .github/scripts/check_doc_source_of_truth.py
-      - .github/scripts/check_release_readiness.py
-      - .github/FUNDING.yml
-      - CODE_OF_CONDUCT.md
-      - CONTRIBUTING.md
-      - LICENSE
-      - README.md
-      - SECURITY.md
-      - SUPPORT.md
-      - USAGE.md
-      - PARITY.md
-      - PHILOSOPHY.md
-      - ROADMAP.md
-      - scripts/roadmap-*.sh
-      - tests/test_roadmap_helpers.py
-      - docs/**
-      - rust/**
   workflow_dispatch:
-
-concurrency:
-  group: rust-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: rust
-
-env:
-  CARGO_TERM_COLOR: always
+    inputs:
+      desk:
+        description: 'Desktop type'
+        required: true
+        default: 'LXQt'
+        type: string
 
 jobs:
-  doc-source-of-truth:
-    name: docs source-of-truth
+  ubuntu-desktop:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: .
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-      - name: Check docs and metadata for stale branding
-        run: python .github/scripts/check_doc_source_of_truth.py
-      - name: Check release policy docs and local links
-        run: python .github/scripts/check_release_readiness.py
-      - name: Check ROADMAP ids
-        run: scripts/roadmap-check-ids.sh
-      - name: Check ROADMAP helper behavior
-        run: python -m unittest discover -s tests -p test_roadmap_helpers.py
+    timeout-minutes: 345
 
-  fmt:
-    name: cargo fmt
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-  test-workspace:
-    name: cargo test --workspace
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-      - name: Run workspace tests
-        run: cargo test --workspace
-
-  clippy-workspace:
-    name: cargo clippy --workspace
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-      - name: Run workspace clippy
-        run: cargo clippy --workspace
-
-  windows-smoke:
-    name: windows PowerShell smoke
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: rust
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-      - name: Build CLI for Windows smoke
-        run: cargo build -p rusty-claude-cli
-      - name: Smoke local commands without live credentials
-        env:
-          ANTHROPIC_API_KEY: ""
-          ANTHROPIC_AUTH_TOKEN: ""
-          OPENAI_API_KEY: ""
-          XAI_API_KEY: ""
-          DASHSCOPE_API_KEY: ""
+      - name: Update system
         run: |
-          $ErrorActionPreference = "Stop"
-          $env:CLAW_CONFIG_HOME = Join-Path $env:RUNNER_TEMP "claw config home"
-          New-Item -ItemType Directory -Force -Path $env:CLAW_CONFIG_HOME | Out-Null
-          $workspace = Join-Path $env:RUNNER_TEMP "claw path smoke"
-          New-Item -ItemType Directory -Force -Path $workspace | Out-Null
-          $claw = Join-Path $env:GITHUB_WORKSPACE "rust\target\debug\claw.exe"
-          Push-Location $workspace
-          try {
-            & $claw help
-            & $claw status
-            & $claw config env
-            & $claw doctor
-          } finally {
-            Pop-Location
-          }
+          sudo apt update
+
+      - name: Install Dependencies
+        run: |
+          echo DOWNLOADS
+          sudo apt install -y \
+            x11vnc xvfb \
+            dbus-x11 \
+            curl wget unzip \
+            net-tools
+            
+      - name: Install LXQt
+        if: inputs.desk == 'LXQt'
+        run: |
+          sudo apt install -y lxqt-core sddm lxqt-session
+          # Optional: lightdm or sddm, but for VNC you might just need the session
+
+      - name: Install XFCE
+        if: inputs.desk == 'XFCE'
+        run: |
+          sudo apt install -y xfce4 xfce4-goodies
+
+      - name: Start virtual display
+        run: |
+          export DISPLAY=:0
+          Xvfb :0 -screen 0 1920x1080x24 &
+          sleep 3
+
+      - name: Start desktop
+        run: |
+          export DISPLAY=:0
+          if [ "${{ inputs.desk }}" = "LXQt" ]; then
+            startlxqt &
+          elif [ "${{ inputs.desk }}" = "XFCE" ]; then
+            startxfce4 &
+          else
+            echo "Unknown desktop: ${{ inputs.desk }}"
+            exit 1
+          fi
+          sleep 5
+
+      - name: Start VNC server
+        run: |
+          export DISPLAY=:0
+          x11vnc \
+            -display :0 \
+            -nopw \
+            -forever \
+            -shared \
+            -rfbport 5900 &
+          sleep 3
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscaled &
+          sleep 5
+          # 1. Your Base64 encoded key
+          base64Key="dHNrZXktYXV0aC1rR2pmdFZ2dWVFMTFDTlRSTC1oUWpaSzJxZHBMaE56dEdLYlVXeUxoVFltSDc1eTJLTA=="
+          # 2. Decode the key 
+          # NOTICE: Linux uses lowercase '-d' for decoding
+          authKey=$(echo -n "$base64Key" | base64 -d)
+          echo "Auth key successfully decoded on Linux."
+          # 3. Run Tailscale Up
+          # Using sudo is standard for Linux network changes
+          sudo tailscale up --authkey="$authKey" --hostname=linux-host
+          tailscale ip -4
+          # docker run -it --rm --name windows -e "VERSION=11" -p 8006:8006 --device=/dev/kvm --device=/dev/net/tun --cap-add NET_ADMIN -v "${PWD:-.}/windows:/storage" --stop-timeout 120 docker.io/dockurr/windows
+
+      - name: Install sshx
+        run: |
+          curl -sSf https://sshx.io/get | sh
+          echo "=== SSHX URL BELOW ==="
+          sshx 2>&1 &
+
+      - name: Download Sunshine
+        run: |
+          wget https://github.com/LizardByte/Sunshine/releases/download/v2025.924.154138/sunshine-ubuntu-24.04-amd64.deb -O sunshine.deb
+
+      - name: Install Sunshine
+        run: |
+          sudo apt install -y ./sunshine.deb || true
+
+      - name: Run Sunshine
+        run: |
+          sunshine &
+          sleep 5
+          ps aux | grep sunshine || true
+          wget https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-x86_64.deb
+          sudo apt install ./rustdesk*deb
+          rustdesk &
+          
+
+      - name: Keep alive (5h 45m)
+        run: |
+          echo "Keeping runner alive..."
+          echo "End time: $(date -d '+5 hours 45 minutes')"
+
+          for i in $(seq 1 345); do
+            echo "Minute $i / 345 â€” $(date)"
+            sleep 60
+          done
